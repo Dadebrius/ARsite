@@ -4,7 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-    
+<body>
+    <model-viewer>
+        src="model.glb"
+        ios-src="model.usdz"
+        alt="3D-модель"
+        ar
+        ar-modes="webxr scene-viewer quick-look"
+        camera-controls
+        environment-image="env.hdr"
+        shadow-intensity="1">
+        <button slot="ar-button">AR</button>
+    </model-viewer>
+        
     <!-- Скрипты -->
     <script src="script.js"></script>
 </body>
