@@ -3,22 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebAR</title>
+    <title>WebAR — GitHub Pages</title>
+    <script type="module"
+            src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js">
+    </script>
+    <style>
+        html, body { margin: 0; height: 100%; background: #111; }
+        model-viewer { width: 100vw; height: 100vh; }
+        #ar-button {
+            background: #fff; color: #000; border: none;
+            border-radius: 999px; padding: 12px 24px;
+            font-size: 15px; font-weight: 600;
+            position: absolute; bottom: 20px; left: 50%;
+            transform: translateX(-50%); cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-    <model-viewer>
+    <model-viewer
         src="model.glb"
         ios-src="model.usdz"
-        alt="3D-модель"
+        alt="3D-модель для AR"
+
         ar
         ar-modes="webxr scene-viewer quick-look"
+        ar-placement="floor"
+        ar-scale="auto"
+
         camera-controls
         environment-image="env.hdr"
         shadow-intensity="1">
-        <button slot="ar-button">AR</button>
+
+        <button id="ar-button" slot="ar-button">
+            Посмотреть в AR
+        </button>
     </model-viewer>
-        
-    <!-- Скрипты -->
-    <script src="script.js"></script>
 </body>
 </html>
