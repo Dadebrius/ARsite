@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>WebXR AR - размещение модели на плоскости</title>
+    <title>WebXR AR - авторазмещение модели</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     
@@ -43,13 +43,14 @@
             display: none;
             pointer-events: none;
             white-space: nowrap;
+            transition: opacity 0.5s;
         }
     </style>
 </head>
 <body>
     
     <button id="start-btn">🚀 Запустить AR</button>
-    <div id="hint">Наведите на пол и коснитесь экрана</div>
+    <div id="hint">Наведите камеру на ровную поверхность...</div>
 
     <a-scene
         renderer="colorManagement: true; physicallyCorrectLights: true;"
@@ -64,17 +65,7 @@
         <!-- Камера -->
         <a-entity id="camera" camera position="0 1.6 0" look-controls="enabled: false"></a-entity>
         
-        <!-- Ретикл (прицел на плоскости) -->
-        <a-entity id="reticle" visible="false">
-            <a-ring rotation="-90 0 0"
-                    radius-inner="0.08" radius-outer="0.1"
-                    color="#00FF00" opacity="0.9"></a-ring>
-            <a-circle rotation="-90 0 0"
-                      radius="0.03"
-                      color="#00FF00" opacity="0.5"></a-circle>
-        </a-entity>
-        
-        <!-- Контейнер для модели (скрыт до размещения) -->
+        <!-- Контейнер для модели (скрыт до обнаружения плоскости) -->
         <a-entity id="model-container" visible="false">
             <a-entity id="ar-model" position="0 0.3 0"
                       animation="property: rotation; to: 0 360 0; loop: true; dur: 8000; easing: linear">
@@ -90,13 +81,12 @@
         const sceneEl = document.querySelector('a-scene');
         const startBtn = document.getElementById('start-btn');
         const hint = document.getElementById('hint');
-        const reticle = document.getElementById('reticle');
         const modelContainer = document.getElementById('model-container');
 
         let xrSession = null;
+        let xrViewerSpace = null;
         let xrRefSpace = null;
         let hitTestSource = null;
-        let hitTestSourceRequested = false;
         let modelPlaced = false;
 
         // -------- Проверка поддержки WebXR --------
@@ -126,31 +116,26 @@
                     domOverlay: { root: document.body }
                 });
 
-                // Настраиваем рендерер A-Frame на работу с нашей сессией
                 const renderer = sceneEl.renderer;
                 renderer.xr.enabled = true;
                 await renderer.xr.setSession(xrSession);
 
-                // Получаем reference space для hit-test
-                xrRefSpace = await xrSession.requestReferenceSpace('viewer');
+                // Reference spaces
+                xrViewerSpace = await xrSession.requestReferenceSpace('viewer');
+                xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
 
-                // Запрашиваем hit-test source (указываем на экран)
-                hitTestSourceRequested = true;
-                xrSession.requestHitTestSource({ space: xrRefSpace })
+                // Запрашиваем hit-test source (направлен от экрана/камеры)
+                xrSession.requestHitTestSource({ space: xrViewerSpace })
                     .then((source) => { hitTestSource = source; })
                     .catch((err) => console.warn('Hit-test source error:', err));
 
-                // Обновляем UI
+                // UI
                 startBtn.style.display = 'none';
                 hint.style.display = 'block';
 
-                // --- ГЛАВНОЕ: обработка тапа внутри AR ---
-                xrSession.addEventListener('select', onSelect);
-
-                // Обработка завершения сессии
                 xrSession.addEventListener('end', onSessionEnd);
 
-                // Запускаем цикл hit-test
+                // Запускаем цикл XR
                 renderer.setAnimationLoop(onXRFrame);
 
             } catch (error) {
@@ -162,78 +147,55 @@
 
         // -------- Цикл обработки кадров XR (hit-test) --------
         function onXRFrame(time, frame) {
-            const session = frame.session;
+            if (!hitTestSource || modelPlaced) return;
+
             const referenceSpace = sceneEl.renderer.xr.getReferenceSpace();
+            if (!referenceSpace) return;
 
-            // Запрашиваем hit-test source один раз
-            if (hitTestSourceRequested === false && session) {
-                session.requestHitTestSource({ space: xrRefSpace })
-                    .then((source) => { hitTestSource = source; });
-                hitTestSourceRequested = true;
-            }
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            if (hitTestResults.length > 0) {
+                const hit = hitTestResults[0];
+                const pose = hit.getPose(referenceSpace);
 
-            // Обновляем позицию ретикла
-            if (hitTestSource && !modelPlaced) {
-                const hitTestResults = frame.getHitTestResults(hitTestSource);
-                if (hitTestResults.length > 0) {
-                    const hit = hitTestResults[0];
-                    const pose = hit.getPose(referenceSpace);
+                if (pose) {
+                    // Как только нашли плоскость — сразу ставим модель
+                    const matrix = pose.transform.matrix;
 
-                    if (pose) {
-                        reticle.setAttribute('visible', true);
-                        reticle.object3D.matrixAutoUpdate = false;
-                        reticle.object3D.matrix.fromArray(pose.transform.matrix);
-                    }
-                } else {
-                    reticle.setAttribute('visible', false);
+                    modelContainer.object3D.matrixAutoUpdate = false;
+                    modelContainer.object3D.matrix.fromArray(matrix);
+                    modelContainer.setAttribute('visible', true);
+
+                    modelPlaced = true;
+
+                    // Обновляем подсказку
+                    hint.textContent = '✓ Модель закреплена на плоскости';
+                    setTimeout(() => {
+                        hint.style.opacity = '0';
+                    }, 2000);
                 }
             }
         }
 
-        // -------- Обработка тапа (select) --------
-        function onSelect() {
-            if (modelPlaced) return;
-            if (!reticle.getAttribute('visible')) return;
-
-            // Копируем позицию ретикла в контейнер модели
-            const matrix = reticle.object3D.matrix.clone();
-            modelContainer.object3D.matrixAutoUpdate = false;
-            modelContainer.object3D.matrix.copy(matrix);
-            modelContainer.setAttribute('visible', true);
-
-            modelPlaced = true;
-            reticle.setAttribute('visible', false);
-
-            // Прячем ретикл и подсказку
-            hint.textContent = '✓ Модель размещена';
-            setTimeout(() => {
-                hint.style.transition = 'opacity 0.5s';
-                hint.style.opacity = '0';
-            }, 1500);
-        }
-
         // -------- Завершение сессии --------
         function onSessionEnd() {
-            xrSession.removeEventListener('select', onSelect);
-            xrSession.removeEventListener('end', onSessionEnd);
+            if (xrSession) {
+                xrSession.removeEventListener('end', onSessionEnd);
+            }
 
             if (hitTestSource) {
                 hitTestSource.cancel();
                 hitTestSource = null;
             }
-            hitTestSourceRequested = false;
-            modelPlaced = false;
 
             sceneEl.renderer.setAnimationLoop(null);
             xrSession = null;
+            modelPlaced = false;
 
-            // Возвращаем UI в исходное состояние
             startBtn.style.display = 'block';
             startBtn.textContent = '🚀 Запустить AR';
             hint.style.display = 'none';
             hint.style.opacity = '1';
 
-            reticle.setAttribute('visible', false);
             modelContainer.setAttribute('visible', false);
         }
     </script>
