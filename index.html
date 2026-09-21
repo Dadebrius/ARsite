@@ -3,31 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AR Debug</title>
+    <title>AR</title>
     <script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: monospace; }
-        #debug {
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            background: rgba(0,0,0,0.85);
-            color: #0f0;
-            padding: 8px 12px;
-            font-size: 13px;
-            z-index: 10000;
-            line-height: 1.4;
-            pointer-events: none;
-            white-space: pre-wrap;
-            max-height: 50vh;
-            overflow: hidden;
-        }
-        #debug .err { color: #f44; }
-        #debug .warn { color: #fa0; }
-        #debug .ok { color: #0f0; }
+        body { margin: 0; overflow: hidden; }
     </style>
 </head>
 <body>
-    <div id="debug">инициализация...</div>
 
     <a-scene
         renderer="alpha: true; colorManagement: true;"
@@ -48,120 +30,62 @@
     </a-scene>
 
     <script>
-        const dbg = document.getElementById('debug');
         const sceneEl = document.querySelector('a-scene');
         const arRoot = document.getElementById('ar-root');
-
-        let lines = [];
-        function log(msg, cls = '') {
-            lines.push(`<span class="${cls}">${msg}</span>`);
-            if (lines.length > 15) lines.shift();
-            dbg.innerHTML = lines.join('<br>');
-            console.log(msg);
-        }
-
-        log('Скрипт запущен');
-        log('WebXR: ' + (navigator.xr ? 'есть' : 'НЕТ'), navigator.xr ? 'ok' : 'err');
-
-        if (navigator.xr) {
-            navigator.xr.isSessionSupported('immersive-ar').then(supported => {
-                log('immersive-ar: ' + (supported ? 'ПОДДЕРЖИВАЕТСЯ' : 'НЕ ПОДДЕРЖИВАЕТСЯ'),
-                    supported ? 'ok' : 'err');
-            });
-        }
-
-        sceneEl.addEventListener('loaded', () => {
-            log('A-Frame scene loaded', 'ok');
-        });
 
         let hitTestSource = null;
         let viewerSpace = null;
         let localFloor = null;
         let modelPlaced = false;
-        let frameCount = 0;
-        let hitsZeroStreak = 0;
 
         sceneEl.addEventListener('enter-vr', async () => {
-            log('enter-vr сработал', 'ok');
-            log('ar-mode: ' + sceneEl.is('ar-mode'), sceneEl.is('ar-mode') ? 'ok' : 'err');
-
             if (!sceneEl.is('ar-mode')) return;
 
             const session = sceneEl.renderer.xr.getSession();
-            if (!session) { log('НЕТ СЕССИИ!', 'err'); return; }
-            log('Сессия получена', 'ok');
+            if (!session) return;
 
             try {
                 viewerSpace = await session.requestReferenceSpace('viewer');
-                log('viewer space OK', 'ok');
-
                 localFloor = await session.requestReferenceSpace('local-floor');
-                log('local-floor space OK', 'ok');
-
                 hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-                log('hitTestSource OK', 'ok');
 
                 session.requestAnimationFrame(onXRFrame);
-                log('XR-цикл запущен', 'ok');
             } catch (err) {
-                log('ОШИБКА: ' + err.message, 'err');
                 console.error(err);
             }
         });
 
         sceneEl.addEventListener('exit-vr', () => {
-            log('exit-vr', 'warn');
             if (hitTestSource) { hitTestSource.cancel(); hitTestSource = null; }
             localFloor = null; viewerSpace = null; modelPlaced = false;
-            hitsZeroStreak = 0;
         });
 
         function onXRFrame(time, frame) {
             frame.session.requestAnimationFrame(onXRFrame);
-            frameCount++;
 
             if (!hitTestSource || !localFloor) return;
-
-            const results = frame.getHitTestResults(hitTestSource);
-
-            if (frameCount % 60 === 0) {
-                log(`frame ${frameCount} | hits: ${results.length}`,
-                    results.length > 0 ? 'ok' : 'warn');
-            }
-
             if (modelPlaced) return;
 
-            if (results.length > 0) {
-                hitsZeroStreak = 0;
-                const pose = results[0].getPose(localFloor);
-                if (!pose) { log('pose = null', 'err'); return; }
+            const results = frame.getHitTestResults(hitTestSource);
+            if (results.length === 0) return;
 
-                log('🎯 ПЛОСКОСТЬ НАЙДЕНА!', 'ok');
+            const pose = results[0].getPose(localFloor);
+            if (!pose) return;
 
-                const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
-                const pos = new THREE.Vector3();
-                const quat = new THREE.Quaternion();
-                const scl = new THREE.Vector3();
-                m.decompose(pos, quat, scl);
+            const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+            const pos = new THREE.Vector3();
+            const quat = new THREE.Quaternion();
+            const scl = new THREE.Vector3();
+            m.decompose(pos, quat, scl);
 
-                log(`pos: ${pos.x.toFixed(2)} ${pos.y.toFixed(2)} ${pos.z.toFixed(2)}`);
+            const obj = arRoot.object3D;
+            obj.position.copy(pos);
+            obj.quaternion.copy(quat);
+            obj.updateMatrix();
+            obj.updateMatrixWorld(true);
 
-                const obj = arRoot.object3D;
-                obj.position.copy(pos);
-                obj.quaternion.copy(quat);
-                obj.updateMatrix();
-                obj.updateMatrixWorld(true);
-
-                arRoot.setAttribute('visible', true);
-                modelPlaced = true;
-
-                log('✅ Модель установлена', 'ok');
-            } else {
-                hitsZeroStreak++;
-                if (hitsZeroStreak === 180) {
-                    log('⚠️ 3 сек без плоскостей. Водите плавно, наведите на пол', 'warn');
-                }
-            }
+            arRoot.setAttribute('visible', true);
+            modelPlaced = true;
         }
     </script>
 </body>
