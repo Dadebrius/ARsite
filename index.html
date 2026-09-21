@@ -3,31 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>WebXR AR - авторазмещение модели</title>
+    <title>AR - авторазмещение модели</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     
     <style>
         body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
-        
-        #start-btn {
-            position: fixed;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 16px 42px;
-            font-size: 18px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 30px;
-            cursor: pointer;
-            z-index: 9999;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            transition: transform 0.1s;
-        }
-        #start-btn:active { transform: translateX(-50%) scale(0.95); }
-        #start-btn:disabled { background: #888; cursor: not-allowed; }
         
         #hint {
             position: fixed;
@@ -45,27 +26,34 @@
             white-space: nowrap;
             transition: opacity 0.5s;
         }
+
+        /* Стилизуем встроенную AR-кнопку A-Frame */
+        .a-enter-vr {
+            font-family: Arial, sans-serif !important;
+        }
     </style>
 </head>
 <body>
     
-    <button id="start-btn">🚀 Запустить AR</button>
     <div id="hint">Наведите камеру на ровную поверхность...</div>
 
+    <!-- 
+      ВАЖНО:
+      - xr-mode-ui="XRMode: ar"  → A-Frame сам создаёт кнопку "AR"
+      - НЕ отключаем xr-mode-ui
+      - webxr без dom-overlay (A-Frame сам разрулит)
+    -->
     <a-scene
-        renderer="colorManagement: true; physicallyCorrectLights: true;"
-        xr-mode-ui="enabled: false"
-        webxr="requiredFeatures: hit-test, local-floor; optionalFeatures: dom-overlay; overlayElement: #overlay;"
-        background="color: #000">
+        renderer="colorManagement: true; physicallyCorrectLights: true; alpha: true;"
+        xr-mode-ui="XRMode: ar; enabled: true"
+        webxr="requiredFeatures: hit-test, local-floor; optionalFeatures: dom-overlay;"
+        background="transparent: true">
         
         <!-- Освещение -->
         <a-entity light="type: ambient; intensity: 0.7"></a-entity>
         <a-entity light="type: directional; intensity: 0.9" position="1 3 1"></a-entity>
         
-        <!-- Камера -->
-        <a-entity id="camera" camera position="0 1.6 0" look-controls="enabled: false"></a-entity>
-        
-        <!-- Контейнер для модели (скрыт до обнаружения плоскости) -->
+        <!-- Модель (скрыта до обнаружения плоскости) -->
         <a-entity id="model-container" visible="false">
             <a-entity id="ar-model" position="0 0.3 0"
                       animation="property: rotation; to: 0 360 0; loop: true; dur: 8000; easing: linear">
@@ -79,124 +67,81 @@
 
     <script>
         const sceneEl = document.querySelector('a-scene');
-        const startBtn = document.getElementById('start-btn');
         const hint = document.getElementById('hint');
         const modelContainer = document.getElementById('model-container');
 
-        let xrSession = null;
-        let xrViewerSpace = null;
-        let xrRefSpace = null;
         let hitTestSource = null;
+        let xrViewerSpace = null;
         let modelPlaced = false;
+        let xrFrameHandle = null;
 
-        // -------- Проверка поддержки WebXR --------
-        if (navigator.xr && navigator.xr.isSessionSupported) {
-            navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-                if (!supported) {
-                    startBtn.textContent = '❌ AR не поддерживается';
-                    startBtn.disabled = true;
-                }
-            });
-        } else {
-            startBtn.textContent = '❌ WebXR не поддерживается';
-            startBtn.disabled = true;
-        }
+        // -------- Вход в AR-сессию --------
+        sceneEl.addEventListener('enter-vr', async () => {
+            if (!sceneEl.is('ar-mode')) return; // только для AR, не VR
 
-        // -------- Запуск AR-сессии --------
-        startBtn.addEventListener('click', async () => {
-            if (xrSession) {
-                await xrSession.end();
-                return;
-            }
+            hint.style.display = 'block';
+            modelPlaced = false;
+
+            const session = sceneEl.renderer.xr.getSession();
+            if (!session) return;
 
             try {
-                xrSession = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['hit-test', 'local-floor'],
-                    optionalFeatures: ['dom-overlay'],
-                    domOverlay: { root: document.body }
-                });
+                xrViewerSpace = await session.requestReferenceSpace('viewer');
 
-                const renderer = sceneEl.renderer;
-                renderer.xr.enabled = true;
-                await renderer.xr.setSession(xrSession);
+                // Запрашиваем hit-test
+                const source = await session.requestHitTestSource({ space: xrViewerSpace });
+                hitTestSource = source;
 
-                // Reference spaces
-                xrViewerSpace = await xrSession.requestReferenceSpace('viewer');
-                xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+                // Подписываемся на кадры XR (НЕ перезаписываем setAnimationLoop!)
+                session.requestAnimationFrame(onXRFrame);
 
-                // Запрашиваем hit-test source (направлен от экрана/камеры)
-                xrSession.requestHitTestSource({ space: xrViewerSpace })
-                    .then((source) => { hitTestSource = source; })
-                    .catch((err) => console.warn('Hit-test source error:', err));
-
-                // UI
-                startBtn.style.display = 'none';
-                hint.style.display = 'block';
-
-                xrSession.addEventListener('end', onSessionEnd);
-
-                // Запускаем цикл XR
-                renderer.setAnimationLoop(onXRFrame);
-
-            } catch (error) {
-                console.error('Ошибка запуска AR:', error);
-                alert('Не удалось запустить AR: ' + error.message);
-                xrSession = null;
+            } catch (err) {
+                console.error('Ошибка hit-test:', err);
             }
         });
 
-        // -------- Цикл обработки кадров XR (hit-test) --------
-        function onXRFrame(time, frame) {
-            if (!hitTestSource || modelPlaced) return;
-
-            const referenceSpace = sceneEl.renderer.xr.getReferenceSpace();
-            if (!referenceSpace) return;
-
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
-            if (hitTestResults.length > 0) {
-                const hit = hitTestResults[0];
-                const pose = hit.getPose(referenceSpace);
-
-                if (pose) {
-                    // Как только нашли плоскость — сразу ставим модель
-                    const matrix = pose.transform.matrix;
-
-                    modelContainer.object3D.matrixAutoUpdate = false;
-                    modelContainer.object3D.matrix.fromArray(matrix);
-                    modelContainer.setAttribute('visible', true);
-
-                    modelPlaced = true;
-
-                    // Обновляем подсказку
-                    hint.textContent = '✓ Модель закреплена на плоскости';
-                    setTimeout(() => {
-                        hint.style.opacity = '0';
-                    }, 2000);
-                }
-            }
-        }
-
-        // -------- Завершение сессии --------
-        function onSessionEnd() {
-            if (xrSession) {
-                xrSession.removeEventListener('end', onSessionEnd);
-            }
-
+        // -------- Выход из AR --------
+        sceneEl.addEventListener('exit-vr', () => {
             if (hitTestSource) {
                 hitTestSource.cancel();
                 hitTestSource = null;
             }
-
-            sceneEl.renderer.setAnimationLoop(null);
-            xrSession = null;
+            hitTestSource = null;
+            xrViewerSpace = null;
             modelPlaced = false;
 
-            startBtn.style.display = 'block';
-            startBtn.textContent = '🚀 Запустить AR';
             hint.style.display = 'none';
             hint.style.opacity = '1';
 
             modelContainer.setAttribute('visible', false);
+        });
+
+        // -------- Цикл обработки XR-кадров --------
+        function onXRFrame(time, frame) {
+            const session = frame.session;
+            // Планируем следующий кадр
+            session.requestAnimationFrame(onXRFrame);
+
+            if (!hitTestSource || modelPlaced) return;
+
+            const refSpace = sceneEl.renderer.xr.getReferenceSpace();
+            if (!refSpace) return;
+
+            const results = frame.getHitTestResults(hitTestSource);
+            if (results.length > 0) {
+                const pose = results[0].getPose(refSpace);
+                if (pose) {
+                    // Ставим модель на найденную плоскость
+                    modelContainer.object3D.matrixAutoUpdate = false;
+                    modelContainer.object3D.matrix.fromArray(pose.transform.matrix);
+                    modelContainer.setAttribute('visible', true);
+
+                    modelPlaced = true;
+
+                    hint.textContent = '✓ Модель закреплена';
+                    setTimeout(() => { hint.style.opacity = '0'; }, 1800);
+                }
+            }
         }
     </script>
 </body>
