@@ -3,90 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AR</title>
+    <title>AR Face Mask — MindAR</title>
     <script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
+    <!-- MindAR для A-Frame -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
     <style>
         body { margin: 0; overflow: hidden; }
+        #hint {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 1000;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
+    <div id="hint">Наведите камеру на лицо</div>
 
     <a-scene
-        renderer="alpha: true; colorManagement: true;"
-        xr-mode-ui="XRMode: ar; enabled: true"
-        webxr="requiredFeatures: hit-test, local-floor;"
-        background="transparent: true">
+        mindar-face="maxTrack: 1; filterMinCF: 0.0001; filterBeta: 0.001;"
+        embedded
+        renderer="alpha: true; antialias: true; colorManagement: true;"
+        background="transparent: true"
+        vr-mode-ui="enabled: false">
 
-        <a-entity light="type: ambient; intensity: 0.9"></a-entity>
-        <a-entity light="type: directional; intensity: 1; position: 1 3 1"></a-entity>
+        <!-- Камера -->
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-        <!-- ВАЖНО: модель БЕЗ visible="false" — она сразу видна -->
-        <a-entity id="ar-root" scale="0.3 0.3 0.3" position="0 0 -1.5">
-            <a-box position="-1 0.5 -3" rotation="0 45 0" color="#4CC3D9"></a-box>
-            <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
-            <a-cylinder position="1 0.75 -3" radius="0.5" height="1.5" color="#FFC65D"></a-cylinder>
-            <a-plane position="0 0 -4" rotation="-90 0 0" width="4" height="4" color="#7BC8A4"></a-plane>
+        <!-- Освещение -->
+        <a-entity light="type: ambient; intensity: 0.8"></a-entity>
+        <a-entity light="type: directional; intensity: 0.6" position="0 1 1"></a-entity>
+
+        <!--
+            Маска-очки, привязанная к ключевым точкам глаз.
+            anchorIndex определяет точку лица:
+            - 168: переносица (между глазами)
+            - 10: лоб
+            - 152: подбородок
+            - 1: нос
+            Для очков лучше всего подходит anchorIndex 168.
+        -->
+        <a-entity mindar-face-target="anchorIndex: 168">
+            <!-- Очки: два тора как линзы + перемычка -->
+            <a-entity position="0 0.02 -0.05" scale="0.12 0.12 0.12">
+                <!-- Левая линза -->
+                <a-torus
+                    color="#00FFFF"
+                    radius="0.8"
+                    radius-tubular="0.08"
+                    segments-radial="16"
+                    segments-tubular="24"
+                    rotation="0 0 0"
+                    position="-0.8 0 0"
+                    material="metalness: 0.8; roughness: 0.2">
+                </a-torus>
+                <!-- Правая линза -->
+                <a-torus
+                    color="#00FFFF"
+                    radius="0.8"
+                    radius-tubular="0.08"
+                    segments-radial="16"
+                    segments-tubular="24"
+                    rotation="0 0 0"
+                    position="0.8 0 0"
+                    material="metalness: 0.8; roughness: 0.2">
+                </a-torus>
+                <!-- Перемычка -->
+                <a-box
+                    color="#00FFFF"
+                    width="0.6"
+                    height="0.08"
+                    depth="0.08"
+                    position="0 0 0"
+                    material="metalness: 0.8; roughness: 0.2">
+                </a-box>
+            </a-entity>
         </a-entity>
+
+        <!--
+            Шляпа, привязанная к точке лба (anchorIndex: 10).
+            Позиция по Y подобрана так, чтобы шляпа «сидела» на голове.
+        -->
+        <a-entity mindar-face-target="anchorIndex: 10">
+            <a-entity position="0 0.25 0.1" scale="0.25 0.25 0.25">
+                <!-- Тулья -->
+                <a-cylinder
+                    color="#FF4444"
+                    radius="0.9"
+                    height="0.8"
+                    position="0 0.4 0"
+                    material="roughness: 0.6">
+                </a-cylinder>
+                <!-- Поля -->
+                <a-cylinder
+                    color="#FF4444"
+                    radius="1.2"
+                    height="0.05"
+                    position="0 0 0"
+                    material="roughness: 0.6">
+                </a-cylinder>
+            </a-entity>
+        </a-entity>
+
+        <!-- Анимированная рамка вокруг лица (привязка к подбородку) -->
+        <a-entity mindar-face-target="anchorIndex: 152">
+            <a-entity
+                position="0 -0.3 0.15"
+                scale="0.35 0.35 0.35"
+                animation="property: rotation; to: 0 360 0; loop: true; dur: 8000; easing: linear">
+                <a-torus
+                    color="#FFD700"
+                    radius="1.2"
+                    radius-tubular="0.04"
+                    segments-radial="8"
+                    segments-tubular="64"
+                    rotation="90 0 0"
+                    material="emissive: #FFD700; emissiveIntensity: 0.5">
+                </a-torus>
+            </a-entity>
+        </a-entity>
+
     </a-scene>
-
-    <script>
-        const sceneEl = document.querySelector('a-scene');
-        const arRoot = document.getElementById('ar-root');
-
-        let hitTestSource = null;
-        let viewerSpace = null;
-        let localFloor = null;
-        let modelPlaced = false;
-
-        sceneEl.addEventListener('enter-vr', async () => {
-            if (!sceneEl.is('ar-mode')) return;
-
-            const session = sceneEl.renderer.xr.getSession();
-            if (!session) return;
-
-            try {
-                viewerSpace = await session.requestReferenceSpace('viewer');
-                localFloor = await session.requestReferenceSpace('local-floor');
-                hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-
-                session.requestAnimationFrame(onXRFrame);
-            } catch (err) {
-                console.error(err);
-            }
-        });
-
-        sceneEl.addEventListener('exit-vr', () => {
-            if (hitTestSource) { hitTestSource.cancel(); hitTestSource = null; }
-            localFloor = null; viewerSpace = null; modelPlaced = false;
-        });
-
-        function onXRFrame(time, frame) {
-            frame.session.requestAnimationFrame(onXRFrame);
-
-            if (!hitTestSource || !localFloor) return;
-            if (modelPlaced) return;
-
-            const results = frame.getHitTestResults(hitTestSource);
-            if (results.length === 0) return;
-
-            const pose = results[0].getPose(localFloor);
-            if (!pose) return;
-
-            const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
-            const pos = new THREE.Vector3();
-            const quat = new THREE.Quaternion();
-            const scl = new THREE.Vector3();
-            m.decompose(pos, quat, scl);
-
-            const obj = arRoot.object3D;
-            obj.position.copy(pos);
-            obj.quaternion.copy(quat);
-            obj.updateMatrix();
-            obj.updateMatrixWorld(true);
-
-            arRoot.setAttribute('visible', true);
-            modelPlaced = true;
-        }
-    </script>
 </body>
 </html>
